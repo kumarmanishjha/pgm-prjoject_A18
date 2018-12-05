@@ -43,7 +43,7 @@ latent_dim= 2
 x = Input(shape=(original_dim,))
 h = Dense(intermediate_dim, activation='relu')(x)
 
-# 算p(Z|X)的均值和方差
+# calculate the mu and sigmas 
 mu = Dense(latent_dim)(h)
 log_sigma = Dense(latent_dim)(h)
 
@@ -79,7 +79,7 @@ vae.compile(optimizer = 'adam')
 vae.summary()
 vae.fit([x_train, y_train], batch_size=m, epochs = 50)
 
-#%%
+#%% Generate image from here (the same way as VAE)
 
 
 
