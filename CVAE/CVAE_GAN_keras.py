@@ -7,11 +7,12 @@ Created on Wed Dec  5 15:45:34 2018
 
 import numpy as np
 import matplotlib.pyplot as plt
+from keras.metrics import binary_accuracy
 import keras.backend as K
 import tensorflow as tf
 
 from keras.datasets import mnist
-from keras.layers import Input, Dense, Lambda, Concatenate
+from keras.layers import Input, Dense, Lambda, concatenate
 from keras.models import Model
 from keras.objectives import binary_crossentropy
 from keras.callbacks import LearningRateScheduler
@@ -19,102 +20,68 @@ from keras.utils import to_categorical
 from keras.engine.topology import Layer
 from keras.optimizers import Adam
 
-#MNIST
-num_classes = 10
-(x_train, y_train_), (x_test, y_test_) = mnist.load_data()
-x_train = x_train.astype('float32') / 255.
-x_test = x_test.astype('float32') / 255.
-x_train = x_train.reshape((len(x_train), np.prod(x_train.shape[1:])))
-x_test = x_test.reshape((len(x_test), np.prod(x_test.shape[1:])))
-y_train = to_categorical(y_train_, num_classes)
-y_test = to_categorical(y_test_, num_classes)
 
-m = 50
-n_x = x_train.shape[1]
-n_y = y_train.shape[1]
+class KLLossLayer(Layer):
+    __name__ = 'kl_loss_layer'
 
-n_epoch = 20
+    def __init__(self, **kwargs):
+        self.is_placeholder = True
+        super(KLLossLayer, self).__init__(**kwargs)
 
-original_dim = 784
-intermediate_dim = 512
-latent_dim= 2
+    def lossfun(self, z_avg, z_log_var):
+        kl_loss = -0.5 * K.mean(1.0 + z_log_var - K.square(z_avg) - K.exp(z_log_var))
+        return kl_loss
 
-#Use image and label as input together
+    def call(self, inputs):
+        z_avg = inputs[0]
+        z_log_var = inputs[1]
+        loss = self.lossfun(z_avg, z_log_var)
+        self.add_loss(loss, inputs=inputs)
 
-#encoder
-x = Input(shape=(original_dim,))
-y = Input(shape=(num_classes,))
+        return z_avg
+    
+class DiscriminatorLossLayer(Layer):
+    __name__ = 'discriminator_loss_layer'
 
-input_original = Concatenate([x, y])
-en_1 = Dense(intermediate_dim, activation='relu')(input_original)
+    def __init__(self, **kwargs):
+        self.is_placeholder = True
+        super(DiscriminatorLossLayer, self).__init__(**kwargs)
 
-encoder = Model(input_original, en_1)
+    def lossfun(self, y_real, y_fake_f, y_fake_p):
+        y_pos = K.ones_like(y_real)
+        y_neg = K.zeros_like(y_real)
+        loss_real = K.binary_crossentropy(y_pos, y_real)
+        loss_fake_f = K.binary_crossentropy(y_neg, y_fake_f)
+        loss_fake_p = K.binary_crossentropy(y_neg, y_fake_p)
+        return K.mean(loss_real + loss_fake_f + loss_fake_p)
 
-# calculate the mu and sigmas 
-mu = Dense(latent_dim)(encoder([x, y]))
-log_sigma = Dense(latent_dim)(encoder([x, y]))
+    def call(self, inputs):
+        y_real = inputs[0]
+        y_fake_f = inputs[1]
+        y_fake_p = inputs[2]
+        loss = self.lossfun(y_real, y_fake_f, y_fake_p)
+        self.add_loss(loss, inputs=inputs)
 
-#KL loss 
-kl_loss = 1 + log_sigma - K.square(mu) - K.exp(log_sigma)
-kl_loss = K.sum(kl_loss, axis=-1)
-kl_loss *= -0.5
-
-#function of sample z randomly
-def sample_z(args):
-    mu, log_sigma = args
-    eps = K.random_normal(shape=(m, latent_dim))
-    return mu + K.exp(log_sigma / 2) * eps
+        return y_real
 
 
-#decoder
-dec_in = Input(shape=(latent_dim,))
-dec_1 = Dense(intermediate_dim, activation='relu')(dec_in)
-dec_out = Dense(original_dim, activation='sigmoid')(dec_1)
-decoder = Model(dec_in, dec_out)
+class ClassifierLossLayer(Layer):
+    __name__ = 'classifier_loss_layer'
 
-# Sample z 
-z = Lambda(sample_z)([mu, log_sigma])
-z_p = Input(shape=(latent_dim,))
-#one fake data
-x_f = decoder([z, y])
-#one real data
-x_p = decoder([z_p, y])
+    def __init__(self, **kwargs):
+        self.is_placeholder = True
+        super(ClassifierLossLayer, self).__init__(**kwargs)
 
-#discriminator 
-dis_in = Input(shape=(original_dim,))
-dis_1 = Dense(intermediate_dim, activation='relu')(dis_in)
-dis_out = Dense(1, activation='sigmoid')
-discriminator = Model(dis_in, [dis_out, dis_1])
+    def lossfun(self, c_true, c_pred):
+        return K.mean(K.categorical_crossentropy(c_true, c_pred))
 
-#real image input 
-y_r , y_r_feature = discriminator(x)
-#fake data input 
-y_f , y_f_feature = discriminator(x_f)
-#real data input
-y_p , y_p_feature = discriminator(x_p)
+    def call(self, inputs):
+        c_true = inputs[0]
+        c_pred = inputs[1]
+        loss = self.lossfun(c_true, c_pred)
+        self.add_loss(loss, inputs=inputs)
 
-
-#discriminator loss
-y_pos = K.ones_like(y_r)
-y_neg = K.zeros_like(y_r)
-loss_real = K.metrics.binary_crossentropy(y_pos, y_r)
-loss_fake_f = K.metrics.binary_crossentropy(y_neg, y_f)
-loss_fake_p = K.metrics.binary_crossentropy(y_neg, y_p)
-d_loss = K.mean(loss_real + loss_fake_f + loss_fake_p)
-
-
-#classificator
-cl_in = Input(shape=(original_dim,))
-cl_1 = Dense(intermediate_dim, activation='relu')(cl_in)
-cl_out = Dense(num_classes, activation='softmax')
-classificator = Model(cl_in, [cl_out, cl_1])
-
-#real image input 
-c_r , c_r_feature = classificator(x)
-#fake data input 
-c_f , c_f_feature = classificator(x_f)
-#real data input
-c_p , c_p_feature = classificator(x_p)
+        return c_true
 
 class GeneratorLossLayer(Layer):
     __name__ = 'generator_loss_layer'
@@ -162,6 +129,110 @@ class FeatureMatchingLayer(Layer):
 
         return f1
 
+
+
+
+
+#MNIST
+num_classes = 10
+(x_train, y_train_), (x_test, y_test_) = mnist.load_data()
+x_train = x_train.astype('float32') / 255.
+x_test = x_test.astype('float32') / 255.
+x_train = x_train.reshape((len(x_train), np.prod(x_train.shape[1:])))
+x_test = x_test.reshape((len(x_test), np.prod(x_test.shape[1:])))
+y_train = to_categorical(y_train_, num_classes)
+y_test = to_categorical(y_test_, num_classes)
+
+m = 50
+n_x = x_train.shape[1]
+n_y = y_train.shape[1]
+
+n_epoch = 20
+
+original_dim = 784
+intermediate_dim = 512
+latent_dim= 2
+
+#Use image and label as input together
+
+#encoder
+x = Input(shape=(original_dim,))
+y = Input(shape=(num_classes,))
+
+original_in = concatenate([x, y])
+en_1 = Dense(intermediate_dim, activation='relu')(original_in)
+encoder = Model([x, y], en_1)
+print ("ENCODER")
+encoder.summary()
+
+# calculate the mu and sigmas 
+mu = Dense(latent_dim)(en_1)
+log_sigma = Dense(latent_dim)(en_1)
+
+#KL loss 
+kl_loss = KLLossLayer()([mu, log_sigma])
+
+#function of sample z randomly
+def sample_z(args):
+    mu, log_sigma = args
+    eps = K.random_normal(shape=(m, latent_dim))
+    return mu + K.exp(log_sigma / 2) * eps
+
+
+#decoder
+dec = Input(shape=(latent_dim,))
+dec_in = concatenate([dec, y])
+dec_1 = Dense(intermediate_dim, activation='relu')(dec_in)
+dec_out = Dense(original_dim, activation='sigmoid')(dec_1)
+decoder = Model([dec, y], dec_out)
+print ("DECODER")
+decoder.summary()
+
+# Sample z 
+z = Lambda(sample_z)([mu, log_sigma])
+z_p = Input(shape=(latent_dim,))
+#one fake data
+x_f = decoder([z, y])
+#one real data
+x_p = decoder([z_p, y])
+
+#discriminator 
+dis_in = Input(shape=(original_dim,))
+dis_1 = Dense(intermediate_dim, activation='relu')(dis_in)
+dis_out = Dense(1, activation='sigmoid')(dis_1)
+discriminator = Model(dis_in, [dis_out, dis_1])
+print ("DISCRIMINATOR")
+discriminator.summary()
+
+#real image input 
+y_r , y_r_feature = discriminator(x)
+#fake data input 
+y_f , y_f_feature = discriminator(x_f)
+#real data input
+y_p , y_p_feature = discriminator(x_p)
+
+
+#discriminator loss
+d_loss = DiscriminatorLossLayer()([y_r, y_f, y_p])
+
+
+#classificator
+cl_in = Input(shape=(original_dim,))
+cl_1 = Dense(intermediate_dim, activation='relu')(cl_in)
+cl_out = Dense(num_classes, activation='softmax')(cl_1)
+classificator = Model(cl_in, [cl_out, cl_1])
+print ("CLASSIFICATOR")
+discriminator.summary()
+
+#real image input 
+c_r , c_r_feature = classificator(x)
+#fake data input 
+c_f , c_f_feature = classificator(x_f)
+#real data input
+c_p , c_p_feature = classificator(x_p)
+
+
+
 #generate loss
 g_loss = GeneratorLossLayer()([x, x_f, y_r_feature, y_f_feature, c_r_feature, c_f_feature])
 gd_loss = FeatureMatchingLayer()([y_r_feature, y_p_feature])
@@ -169,7 +240,7 @@ gc_loss = FeatureMatchingLayer()([c_r_feature, c_p_feature])
 
 
 #classification loss
-c_loss = K.mean(K.metrics.categorical_crossentropy(y, y_r))
+c_loss = ClassifierLossLayer()([y, y_r])
 
 #establish the trainer for each model
 #set trainnable
@@ -192,9 +263,9 @@ def discriminator_accuracy(x_r, x_f, x_p):
     def accfun(y0, y1):
         x_pos = K.ones_like(x_r)
         x_neg = K.zeros_like(x_r)
-        loss_r = K.mean(K.metrics.binary_accuracy(x_pos, x_r))
-        loss_f = K.mean(K.metrics.binary_accuracy(x_neg, x_f))
-        loss_p = K.mean(K.metrics.binary_accuracy(x_neg, x_p))
+        loss_r = K.mean(binary_accuracy(x_pos, x_r))
+        loss_f = K.mean(binary_accuracy(x_neg, x_f))
+        loss_p = K.mean(binary_accuracy(x_neg, x_p))
         return (1.0 / 3.0) * (loss_r + loss_p + loss_f)
 
     return accfun
@@ -202,8 +273,8 @@ def discriminator_accuracy(x_r, x_f, x_p):
 def generator_accuracy(x_p, x_f):
     def accfun(y0, y1):
         x_pos = K.ones_like(x_p)
-        loss_p = K.mean(K.metrics.binary_accuracy(x_pos, x_p))
-        loss_f = K.mean(K.metrics.binary_accuracy(x_pos, x_f))
+        loss_p = K.mean(binary_accuracy(x_pos, x_p))
+        loss_f = K.mean(binary_accuracy(x_pos, x_f))
         return 0.5 * (loss_p + loss_f)
 
     return accfun
@@ -262,26 +333,29 @@ enc_trainer.summary()
 def train_on_batch(x_batch):
     x_r, c = x_batch
 
-    batchsize = len(x)
+    print (x_r.shape)
+    print (c.shape)
+    
+    batchsize = x_r.shape[0]
     z_p = np.random.normal(size=(batchsize, latent_dim)).astype('float32')
 
-    x_dummy = np.zeros(x.shape, dtype='float32')
-    c_dummy = np.zeros(y.shape, dtype='float32')
+    x_dummy = np.zeros(x_r[0,:].shape, dtype='float32')
+    c_dummy = np.zeros(c[0,:].shape, dtype='float32')
     z_dummy = np.zeros(z_p.shape, dtype='float32')
     y_dummy = np.zeros((batchsize, 1), dtype='float32')
     f_dummy = np.zeros((batchsize, 8192), dtype='float32')
 
     # Train autoencoder
-    enc_trainer.train_on_batch([x, y, z_p], [x_dummy, z_dummy])
+    enc_trainer.train_on_batch([x_r, c, z_p], [x_dummy, z_dummy])
 
     # Train generator
-    g_loss, _, _, _, _, _, g_acc = dec_trainer.train_on_batch([x, y, z_p], [x_dummy, f_dummy, f_dummy])
+    g_loss, _, _, _, _, _, g_acc = dec_trainer.train_on_batch([x_r, c, z_p], [x_dummy, f_dummy, f_dummy])
 
     # Train classifier
-    cls_trainer.train_on_batch([x, y], c_dummy)
+    cls_trainer.train_on_batch([x_r, c], c_dummy)
 
     # Train discriminator
-    d_loss, d_acc = dis_trainer.train_on_batch([x, y, z_p], y_dummy)
+    d_loss, d_acc = dis_trainer.train_on_batch([x_r, c, z_p], y_dummy)
 
     loss = {
         'g_loss': g_loss,
@@ -296,3 +370,4 @@ def predict(z_samples):
 
 #%%
     
+train_on_batch([x_train[0:m,:], y_train[0:m,:]])
