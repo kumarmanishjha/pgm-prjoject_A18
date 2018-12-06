@@ -130,9 +130,6 @@ class FeatureMatchingLayer(Layer):
         return f1
 
 
-
-
-
 #MNIST
 num_classes = 10
 (x_train, y_train_), (x_test, y_test_) = mnist.load_data()
@@ -290,6 +287,8 @@ cls_trainer = Model(inputs=[x, y],
                          outputs=[c_loss])
 cls_trainer.compile(loss=[zero_loss],
                          optimizer=Adam(lr=2.0e-4, beta_1=0.5))
+
+print ("CLASSIFICATOR TRAINER")
 cls_trainer.summary()
 
 # Build discriminator trainer
@@ -303,6 +302,8 @@ dis_trainer = Model(inputs=[x, y, z_p],
 dis_trainer.compile(loss=[zero_loss],
                          optimizer=Adam(lr=2.0e-4, beta_1=0.5),
                          metrics=[discriminator_accuracy(y_r, y_f, y_p)])
+
+print ("SISCRIMINATOR　TRAINER")
 dis_trainer.summary()
 
 # Build generator trainer
@@ -327,20 +328,19 @@ enc_trainer = Model(inputs=[x, y, z_p],
                         outputs=[g_loss, kl_loss])
 enc_trainer.compile(loss=[zero_loss, zero_loss],
                         optimizer=Adam(lr=2.0e-4, beta_1=0.5))
+
+print ("ENCODER TRAINER")
 enc_trainer.summary()
 
-#%% training 
+#%% training
 def train_on_batch(x_batch):
     x_r, c = x_batch
-
-    print (x_r.shape)
-    print (c.shape)
     
     batchsize = x_r.shape[0]
     z_p = np.random.normal(size=(batchsize, latent_dim)).astype('float32')
 
-    x_dummy = np.zeros(x_r[0,:].shape, dtype='float32')
-    c_dummy = np.zeros(c[0,:].shape, dtype='float32')
+    x_dummy = np.zeros(x_r.shape, dtype='float32')
+    c_dummy = np.zeros(c.shape, dtype='float32')
     z_dummy = np.zeros(z_p.shape, dtype='float32')
     y_dummy = np.zeros((batchsize, 1), dtype='float32')
     f_dummy = np.zeros((batchsize, 8192), dtype='float32')
@@ -368,6 +368,37 @@ def train_on_batch(x_batch):
 def predict(z_samples):
     return decoder.predict(z_samples)
 
-#%%
-    
-train_on_batch([x_train[0:m,:], y_train[0:m,:]])
+#%% Training 
+n_epoch = 20
+
+#manual training the Model in loops
+size = x_train.shape[0]
+loss = 0
+for epoch in range(n_epoch):
+    print ("epochs: ", epoch)
+    print (loss)
+    for i in range(int(size/m)):
+        idx = np.random.randint(0, x_train.shape[0], m)
+        imgs = x_train[idx]
+        labels = y_train[idx]
+        loss = train_on_batch([imgs, labels])
+
+#%% generate image
+
+num_generated = 10
+
+digit = 8
+ydd = np.ones(num_generated )*digit
+
+sample =  np.random.normal(size=(num_generated , latent_dim)).astype('float32')
+yd = to_categorical(ydd, num_classes)
+
+pred = decoder.predict([sample, yd], batch_size = num_generated )
+
+#%% show generated Image
+
+
+for i in range(num_generated):
+    img = pred[i,:].reshape(28,28)
+    plt.imshow(img, cmap='Greys_r')
+    plt.show()
