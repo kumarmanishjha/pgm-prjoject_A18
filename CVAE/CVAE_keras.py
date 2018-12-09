@@ -81,5 +81,52 @@ vae.fit([x_train, y_train], batch_size=m, epochs = 50)
 
 #%% Generate image from here (the same way as VAE)
 
+#%%
+#build encoder
+encoder = Model(x, mu)
+
+x_test_encoded = encoder.predict(x_test)
+plt.figure(figsize=(6, 6))
+plt.scatter(x_test_encoded[:, 0], x_test_encoded[:, 1], c=y_test_)
+plt.colorbar()
+plt.show()
+
+#build decoder
+decoder_input = Input(shape=(latent_dim,))
+_h_decoded = decoder_h(decoder_input)
+_x_decoded_mean = decoder_mean(_h_decoded)
+generator = Model(decoder_input, _x_decoded_mean)
+
+# ouput the mu of different y
+mu = Model(y, yh)
+mu = mu.predict(np.eye(num_classes))
+
+# plot
+n = 15  # figure with 15x15 digits
+digit_size = 28
+figure = np.zeros((digit_size * n, digit_size * n))
+
+#%%
+
+#designated the number u want
+output_digit = 8 
+
+# 用正态分布的分位数来构建隐变量对
+grid_x = norm.ppf(np.linspace(0.05, 0.95, n)) + mu[output_digit][1]
+grid_y = norm.ppf(np.linspace(0.05, 0.95, n)) + mu[output_digit][0]
+
+for i, yi in enumerate(grid_x):
+    for j, xi in enumerate(grid_y):
+        z_sample = np.array([[xi, yi]])
+        x_decoded = generator.predict(z_sample)
+        digit = x_decoded[0].reshape(digit_size, digit_size)
+        figure[i * digit_size: (i + 1) * digit_size,
+               j * digit_size: (j + 1) * digit_size] = digit
+
+plt.figure(figsize=(10, 10))
+plt.imshow(figure, cmap='Greys_r')
+plt.show()
+
+
 
 

@@ -387,7 +387,9 @@ for epoch in range(n_epoch):
 
 num_generated = 10
 
-digit = 8
+#the number you want to produce
+digit = 9
+
 ydd = np.ones(num_generated )*digit
 
 sample =  np.random.normal(size=(num_generated , latent_dim)).astype('float32')
