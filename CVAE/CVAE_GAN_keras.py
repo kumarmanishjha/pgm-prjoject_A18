@@ -12,7 +12,7 @@ import keras.backend as K
 import tensorflow as tf
 
 from keras.datasets import mnist
-from keras.layers import Input, Dense, Lambda, concatenate
+from keras.layers import Input, Dense, Lambda, Reshape, UpSampling2D, Concatenate, Conv2D, AveragePooling2D, Dropout, Flatten
 from keras.models import Model
 from keras.objectives import binary_crossentropy
 from keras.callbacks import LearningRateScheduler
@@ -135,11 +135,16 @@ num_classes = 10
 (x_train, y_train_), (x_test, y_test_) = mnist.load_data()
 x_train = x_train.astype('float32') / 255.
 x_test = x_test.astype('float32') / 255.
-x_train = x_train.reshape((len(x_train), np.prod(x_train.shape[1:])))
-x_test = x_test.reshape((len(x_test), np.prod(x_test.shape[1:])))
+#x_train = x_train.reshape((len(x_train), np.prod(x_train.shape[1:])))
+#x_test = x_test.reshape((len(x_test), np.prod(x_test.shape[1:])))
 y_train = to_categorical(y_train_, num_classes)
 y_test = to_categorical(y_test_, num_classes)
 
+
+x_train = np.expand_dims(x_train , axis = -1)
+x_test = np.expand_dims(x_test, axis = -1)
+
+#%%
 m = 50
 n_x = x_train.shape[1]
 n_y = y_train.shape[1]
@@ -150,21 +155,41 @@ original_dim = 784
 intermediate_dim = 512
 latent_dim= 2
 
+input_shape = x_train.shape[1:2]
 #Use image and label as input together
 
-#encoder
-x = Input(shape=(original_dim,))
-y = Input(shape=(num_classes,))
+#Build Encoder
+img = Input(shape=(28,28, 1))
+label = Input(shape=(num_classes,))
 
-original_in = concatenate([x, y])
-en_1 = Dense(intermediate_dim, activation='relu')(original_in)
-encoder = Model([x, y], en_1)
+c = Reshape((1, 1, num_classes))(label)
+c = UpSampling2D(size=(28, 28))(c)
+en = Concatenate(axis=-1)([img, c])
+
+en = Conv2D(32, (3, 3), padding='same', activation='relu')(en)
+en = Conv2D(32, (3, 3), padding='same', activation='relu')(en)
+en = AveragePooling2D(pool_size=(2, 2))(en)
+en = Dropout(0.2)(en)
+
+en = Conv2D(64, (3, 3), padding='same', activation='relu')(en)
+en = Conv2D(64, (3, 3), padding='same', activation='relu')(en)
+en = AveragePooling2D(pool_size=(2, 2))(en)
+en = Dropout(0.2)(en)
+
+en = Conv2D(128, (3, 3), padding='same', activation='relu')(en)
+en = Conv2D(128, (3, 3), padding='same', activation='relu')(en)
+en = AveragePooling2D(pool_size=(2, 2))(en)
+en = Dropout(0.2)(en)
+
+en = Flatten()(en)
+
+encoder = Model([img, label], en)
 print ("ENCODER")
 encoder.summary()
 
-# calculate the mu and sigmas 
-mu = Dense(latent_dim)(en_1)
-log_sigma = Dense(latent_dim)(en_1)
+#calculate the mu and sigmas 
+mu = Dense(latent_dim)(en)
+log_sigma = Dense(latent_dim)(en)
 
 #KL loss 
 kl_loss = KLLossLayer()([mu, log_sigma])
@@ -176,12 +201,26 @@ def sample_z(args):
     return mu + K.exp(log_sigma / 2) * eps
 
 
-#decoder
+#Build Decoder
 dec = Input(shape=(latent_dim,))
-dec_in = concatenate([dec, y])
-dec_1 = Dense(intermediate_dim, activation='relu')(dec_in)
-dec_out = Dense(original_dim, activation='sigmoid')(dec_1)
-decoder = Model([dec, y], dec_out)
+dec_in = Concatenate(axis=-1)([dec, label])
+de = Dense(7*7*128, activation='relu')(dec_in)
+de = Reshape((7,7,128))(de)
+
+de = UpSampling2D((2, 2))(de)
+de = Conv2D(256, (3, 3), padding='same', activation='relu')(de)
+de = Conv2D(256, (3, 3), padding='same', activation='relu')(de)
+
+de = UpSampling2D((2, 2))(de)
+de = Conv2D(128, (3, 3), padding='same', activation='relu')(de)
+de = Conv2D(128, (3, 3), padding='same', activation='relu')(de)
+
+de = UpSampling2D((1, 1))(de)
+de = Conv2D(64, (3, 3), padding='same', activation='relu')(de)
+de = Conv2D(64, (3, 3), padding='same', activation='relu')(de)
+
+h_decoded = Conv2D(1, (3, 3), activation='sigmoid', padding='same')(de)
+decoder = Model([dec, label], h_decoded)
 print ("DECODER")
 decoder.summary()
 
@@ -189,20 +228,36 @@ decoder.summary()
 z = Lambda(sample_z)([mu, log_sigma])
 z_p = Input(shape=(latent_dim,))
 #one fake data
-x_f = decoder([z, y])
+x_f = decoder([z, label])
 #one real data
-x_p = decoder([z_p, y])
+x_p = decoder([z_p, label])
 
 #discriminator 
-dis_in = Input(shape=(original_dim,))
-dis_1 = Dense(intermediate_dim, activation='relu')(dis_in)
-dis_out = Dense(1, activation='sigmoid')(dis_1)
-discriminator = Model(dis_in, [dis_out, dis_1])
+dis_in = Input(shape=(28,28,1))
+di = Conv2D(32, (3, 3), padding='same', activation='relu')(dis_in)
+di = Conv2D(32, (3, 3), padding='same', activation='relu')(di)
+di = AveragePooling2D(pool_size=(2, 2))(di)
+di = Dropout(0.2)(di)
+
+di = Conv2D(64, (3, 3), padding='same', activation='relu')(di)
+di = Conv2D(64, (3, 3), padding='same', activation='relu')(di)
+di = AveragePooling2D(pool_size=(2, 2))(di)
+di = Dropout(0.2)(di)
+
+di = Conv2D(128, (3, 3), padding='same', activation='relu')(di)
+di = Conv2D(128, (3, 3), padding='same', activation='relu')(di)
+di = AveragePooling2D(pool_size=(2, 2))(di)
+di = Dropout(0.2)(di)
+
+di = Flatten()(di)
+dis_out = Dense(1, activation='sigmoid')(di)
+
+discriminator = Model(dis_in, [dis_out, di])
 print ("DISCRIMINATOR")
 discriminator.summary()
 
 #real image input 
-y_r , y_r_feature = discriminator(x)
+y_r , y_r_feature = discriminator(img)
 #fake data input 
 y_f , y_f_feature = discriminator(x_f)
 #real data input
@@ -214,15 +269,30 @@ d_loss = DiscriminatorLossLayer()([y_r, y_f, y_p])
 
 
 #classificator
-cl_in = Input(shape=(original_dim,))
-cl_1 = Dense(intermediate_dim, activation='relu')(cl_in)
-cl_out = Dense(num_classes, activation='softmax')(cl_1)
-classificator = Model(cl_in, [cl_out, cl_1])
+cl_in = Input(shape=(28,28,1))
+cl = Conv2D(32, (3, 3), padding='same', activation='relu')(cl_in)
+cl = Conv2D(32, (3, 3), padding='same', activation='relu')(cl)
+cl = AveragePooling2D(pool_size=(2, 2))(cl)
+cl = Dropout(0.2)(cl)
+
+cl = Conv2D(64, (3, 3), padding='same', activation='relu')(cl)
+cl = Conv2D(64, (3, 3), padding='same', activation='relu')(cl)
+cl = AveragePooling2D(pool_size=(2, 2))(cl)
+cl = Dropout(0.2)(cl)
+
+cl = Conv2D(128, (3, 3), padding='same', activation='relu')(cl)
+cl = Conv2D(128, (3, 3), padding='same', activation='relu')(cl)
+cl = AveragePooling2D(pool_size=(2, 2))(cl)
+cl = Dropout(0.2)(cl)
+
+cl = Flatten()(cl)
+cl_out = Dense(num_classes, activation='softmax')(cl)
+classificator = Model(cl_in, [cl_out, cl])
 print ("CLASSIFICATOR")
-discriminator.summary()
+classificator.summary()
 
 #real image input 
-c_r , c_r_feature = classificator(x)
+c_r , c_r_feature = classificator(img)
 #fake data input 
 c_f , c_f_feature = classificator(x_f)
 #real data input
@@ -231,13 +301,13 @@ c_p , c_p_feature = classificator(x_p)
 
 
 #generate loss
-g_loss = GeneratorLossLayer()([x, x_f, y_r_feature, y_f_feature, c_r_feature, c_f_feature])
+g_loss = GeneratorLossLayer()([img, x_f, y_r_feature, y_f_feature, c_r_feature, c_f_feature])
 gd_loss = FeatureMatchingLayer()([y_r_feature, y_p_feature])
 gc_loss = FeatureMatchingLayer()([c_r_feature, c_p_feature])
 
 
 #classification loss
-c_loss = ClassifierLossLayer()([y, y_r])
+c_loss = ClassifierLossLayer()([label, y_r])
 
 #establish the trainer for each model
 #set trainnable
@@ -283,7 +353,7 @@ set_trainable(decoder, False)
 set_trainable(discriminator, False)
 set_trainable(classificator, True)
 
-cls_trainer = Model(inputs=[x, y],
+cls_trainer = Model(inputs=[img, label],
                          outputs=[c_loss])
 cls_trainer.compile(loss=[zero_loss],
                          optimizer=Adam(lr=2.0e-4, beta_1=0.5))
@@ -297,7 +367,7 @@ set_trainable(decoder, False)
 set_trainable(discriminator, True)
 set_trainable(classificator, False)
 
-dis_trainer = Model(inputs=[x, y, z_p],
+dis_trainer = Model(inputs=[img, label, z_p],
                          outputs=[d_loss])
 dis_trainer.compile(loss=[zero_loss],
                          optimizer=Adam(lr=2.0e-4, beta_1=0.5),
@@ -312,7 +382,7 @@ set_trainable(decoder, True)
 set_trainable(discriminator, False)
 set_trainable(classificator, False)
 
-dec_trainer = Model(inputs=[x, y, z_p],
+dec_trainer = Model(inputs=[img, label, z_p],
                          outputs=[g_loss, gd_loss, gc_loss])
 dec_trainer.compile(loss=[zero_loss, zero_loss, zero_loss],
                          optimizer=Adam(lr=2.0e-4, beta_1=0.5),
@@ -324,7 +394,7 @@ set_trainable(decoder, False)
 set_trainable(discriminator, False)
 set_trainable(classificator, False)
 
-enc_trainer = Model(inputs=[x, y, z_p],
+enc_trainer = Model(inputs=[img, label, z_p],
                         outputs=[g_loss, kl_loss])
 enc_trainer.compile(loss=[zero_loss, zero_loss],
                         optimizer=Adam(lr=2.0e-4, beta_1=0.5))
@@ -350,6 +420,8 @@ def train_on_batch(x_batch):
 
     # Train generator
     g_loss, _, _, _, _, _, g_acc = dec_trainer.train_on_batch([x_r, c, z_p], [x_dummy, f_dummy, f_dummy])
+
+    
 
     # Train classifier
     cls_trainer.train_on_batch([x_r, c], c_dummy)
