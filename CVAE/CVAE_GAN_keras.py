@@ -9,6 +9,9 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 import tensorflow as tf
+import pickle
+from skimage.io import imsave
+import itertools 
 
 from keras.metrics import binary_accuracy
 import keras.backend as K
@@ -21,6 +24,7 @@ from keras.utils import to_categorical
 from keras.engine.topology import Layer
 from keras.optimizers import Adam
 
+import scipy.misc
 
 class KLLossLayer(Layer):
     __name__ = 'kl_loss_layer'
@@ -130,41 +134,132 @@ class FeatureMatchingLayer(Layer):
 
         return f1
 
-
+#%%
 #MNIST
+#num_classes = 10
+#(x_train, y_train_), (x_test, y_test_) = mnist.load_data()
+#x_train = x_train.astype('float32') / 255.
+#x_test = x_test.astype('float32') / 255.
+##x_train = x_train.reshape((len(x_train), np.prod(x_train.shape[1:])))
+##x_test = x_test.reshape((len(x_test), np.prod(x_test.shape[1:])))
+#y_train = to_categorical(y_train_, num_classes)
+#y_test = to_categorical(y_test_, num_classes)
+#
+#
+#x_train = np.expand_dims(x_train , axis = -1)
+#x_test = np.expand_dims(x_test, axis = -1)
+
+
+#%% CIFAR-10
+
+
+classes = ('plane', 'car', 'bird', 'cat',
+           'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
+
 num_classes = 10
-(x_train, y_train_), (x_test, y_test_) = mnist.load_data()
-x_train = x_train.astype('float32') / 255.
-x_test = x_test.astype('float32') / 255.
-#x_train = x_train.reshape((len(x_train), np.prod(x_train.shape[1:])))
-#x_test = x_test.reshape((len(x_test), np.prod(x_test.shape[1:])))
-y_train = to_categorical(y_train_, num_classes)
-y_test = to_categorical(y_test_, num_classes)
+
+img_rows, img_cols = 32, 32
+channels = 3
+input_shape = (img_rows, img_cols, channels)
+def load_pickle(f):
+        return  pickle.load(f, encoding='latin1')
+
+def load_CIFAR_batch(filename):
+    """ load single batch of cifar """
+    with open(filename, 'rb') as f:
+        datadict = load_pickle(f)
+        X = datadict['data']
+        Y = datadict['labels']
+        X = X.reshape(10000,3072)
+        Y = np.array(Y)
+        return X, Y
+
+def load_CIFAR10(ROOT):
+    """ load all of cifar """
+    xs = []
+    ys = []
+    for b in range(1,6):
+        f = os.path.join(ROOT, 'data_batch_%d' % (b, ))
+        X, Y = load_CIFAR_batch(f)
+        xs.append(X)
+        ys.append(Y)
+    Xtr = np.concatenate(xs)
+    Ytr = np.concatenate(ys)
+    del X, Y
+    Xte, Yte = load_CIFAR_batch(os.path.join(ROOT, 'test_batch'))
+    return Xtr, Ytr, Xte, Yte
+def get_CIFAR10_data(num_training=49000, num_validation=1000, num_test=10000):
+    # Load the raw CIFAR-10 data
+    cifar10_dir = 'D:/ML_project/cifar-10-batches-py/'
+    X_train, y_train, X_test, y_test = load_CIFAR10(cifar10_dir)
+
+    # Subsample the data
+    mask = range(num_training, num_training + num_validation)
+    X_val = X_train[mask]
+    y_val = y_train[mask]
+    mask = range(num_training)
+    X_train = X_train[mask]
+    y_train = y_train[mask]
+    mask = range(num_test)
+    X_test = X_test[mask]
+    y_test = y_test[mask]
+
+    x_train = X_train.astype('float32')
+    x_test = X_test.astype('float32')
+    x_val = X_val.astype('float32')
+    x_train /= 255
+    x_test /= 255
+    x_val /= 255
+    
+
+    return x_train, y_train, x_val, y_val, x_test, y_test
 
 
-x_train = np.expand_dims(x_train , axis = -1)
-x_test = np.expand_dims(x_test, axis = -1)
+# Invoke the above function to get our data.
+x_train, y_train, x_val, y_val, x_test, y_test = get_CIFAR10_data()
+
+
+print('Train data shape: ', x_train.shape)
+print('Train labels shape: ', y_train.shape)
+print('Validation data shape: ', x_val.shape)
+print('Validation labels shape: ', y_val.shape)
+print('Test data shape: ', x_test.shape)
+print('Test labels shape: ', y_test.shape)
+
+y_train = to_categorical(y_train, num_classes)
+y_val =  to_categorical(y_val, num_classes)
+y_test = to_categorical(y_test, num_classes)
+
+def to_image(data, row, col, channel):
+    size = data.shape[0]
+    tp = np.zeros((size, row, col, channel))
+    for i in range(size):
+        tp[i,:,:,:] = np.transpose(np.reshape(data[i,:],(3, 32,32)), (1,2,0))
+    return tp
+        
+x_train = to_image(x_train, img_rows, img_cols, channels)
+x_val = to_image(x_val, img_rows, img_cols, channels)
+x_test = to_image(x_test, img_rows, img_cols, channels)
+
+
 
 #%%
-m = 50
+m = 128
 n_x = x_train.shape[1]
 n_y = y_train.shape[1]
 
 n_epoch = 20
 
-original_dim = 784
-intermediate_dim = 512
-latent_dim= 2
+latent_dim= 100
 
-input_shape = x_train.shape[1:2]
 #Use image and label as input together
 
 #Build Encoder
-img = Input(shape=(28,28, 1))
+img = Input(input_shape)
 label = Input(shape=(num_classes,))
 
 c = Reshape((1, 1, num_classes))(label)
-c = UpSampling2D(size=(28, 28))(c)
+c = UpSampling2D(size=(img_rows, img_cols))(c)
 en = Concatenate(axis=-1)([img, c])
 
 en = Conv2D(32, (3, 3), padding='same', activation='relu')(en)
@@ -184,13 +279,15 @@ en = Dropout(0.2)(en)
 
 en = Flatten()(en)
 
-encoder = Model([img, label], en)
-print ("ENCODER")
-encoder.summary()
 
 #calculate the mu and sigmas 
 mu = Dense(latent_dim)(en)
 log_sigma = Dense(latent_dim)(en)
+
+
+encoder = Model([img, label], mu)
+print ("ENCODER")
+encoder.summary()
 
 #KL loss 
 kl_loss = KLLossLayer()([mu, log_sigma])
@@ -205,8 +302,8 @@ def sample_z(args):
 #Build Decoder
 dec = Input(shape=(latent_dim,))
 dec_in = Concatenate(axis=-1)([dec, label])
-de = Dense(7*7*128, activation='relu')(dec_in)
-de = Reshape((7,7,128))(de)
+de = Dense(4*4*128, activation='relu')(dec_in)
+de = Reshape((4,4,128))(de)
 
 de = UpSampling2D((2, 2))(de)
 de = Conv2D(256, (3, 3), padding='same', activation='relu')(de)
@@ -216,11 +313,11 @@ de = UpSampling2D((2, 2))(de)
 de = Conv2D(128, (3, 3), padding='same', activation='relu')(de)
 de = Conv2D(128, (3, 3), padding='same', activation='relu')(de)
 
-de = UpSampling2D((1, 1))(de)
+de = UpSampling2D((2, 2))(de)
 de = Conv2D(64, (3, 3), padding='same', activation='relu')(de)
 de = Conv2D(64, (3, 3), padding='same', activation='relu')(de)
 
-h_decoded = Conv2D(1, (3, 3), activation='sigmoid', padding='same')(de)
+h_decoded = Conv2D(3, (3, 3), activation='sigmoid', padding='same')(de)
 decoder = Model([dec, label], h_decoded)
 print ("DECODER")
 decoder.summary()
@@ -234,7 +331,7 @@ x_f = decoder([z, label])
 x_p = decoder([z_p, label])
 
 #discriminator 
-dis_in = Input(shape=(28,28,1))
+dis_in = Input(shape=input_shape)
 di = Conv2D(32, (3, 3), padding='same', activation='relu')(dis_in)
 di = Conv2D(32, (3, 3), padding='same', activation='relu')(di)
 di = AveragePooling2D(pool_size=(2, 2))(di)
@@ -270,7 +367,7 @@ d_loss = DiscriminatorLossLayer()([y_r, y_f, y_p])
 
 
 #classificator
-cl_in = Input(shape=(28,28,1))
+cl_in = Input(shape= input_shape)
 cl = Conv2D(32, (3, 3), padding='same', activation='relu')(cl_in)
 cl = Conv2D(32, (3, 3), padding='same', activation='relu')(cl)
 cl = AveragePooling2D(pool_size=(2, 2))(cl)
@@ -407,10 +504,32 @@ enc_trainer.summary()
 def save_batch_result(batch_data, path, epoch):
     batch_size = batch_data.shape[0]
     for i in range(batch_size):
-        img_sav = np.squeeze(batch_data[i,:,:,:])*255
         f_name = str(epoch) + '_' + str(i) + '.png'
-        plt.imsave(os.path.join(path,f_name), img_sav.astype(np.uint8), cmap='gray')
+        img_sav = batch_data[i]
+        imsave(os.path.join(path,f_name), img_sav)
 
+def show_result(batch_data, path, epoch, show):
+      size_figure_grid = 5
+      fig, ax = plt.subplots(size_figure_grid, size_figure_grid, figsize=(5, 5))
+      for i, j in itertools.product(range(size_figure_grid), range(size_figure_grid)):
+          ax[i, j].get_xaxis().set_visible(False)
+          ax[i, j].get_yaxis().set_visible(False)
+
+      for k in range(5*5):
+          i = k // 5
+          j = k % 5
+          ax[i, j].cla()
+          ax[i, j].imshow(batch_data[k])
+
+      label = 'Epoch {0}'.format(epoch)
+      fig.text(0.5, 0.04, label, ha='center')
+      plt.savefig(os.path.join(path, str(epoch)))
+
+      if show:
+          plt.show()
+      else:
+          plt.close()
+    
 
 
 def train_on_batch(x_batch, epoch):
@@ -432,13 +551,6 @@ def train_on_batch(x_batch, epoch):
     g_loss, _, _,  _, _, _, g_acc = dec_trainer.train_on_batch([x_r, c, z_p], [x_dummy, f_dummy, f_dummy])
 
     
-    #save input image
-    save_batch_result(x_r, 'Fixed_results', epoch)
-    
-    #save generated image
-    f_latent = encoder.predict(x_r, c)
-    f_image = decoder.predict(f_latent, label)
-    save_batch_result(f_image, 'Fixed_results', epoch)
     # Train classifier
     cls_trainer.train_on_batch([x_r, c], c_dummy)
 
@@ -457,44 +569,58 @@ def predict(z_samples):
     return decoder.predict(z_samples)
 
 #%% Training 
-n_epoch = 1
+n_epoch = 20
 
 # results save folder
 if not os.path.isdir('Random_results'):
     os.mkdir('Random_results')
 if not os.path.isdir('Fixed_results'):
     os.mkdir('Fixed_results')
+if not os.path.isdir('results'):
+    os.mkdir('Results')
 
-#%%
-#manual training the Model in loops
+
+
+#%%%
 size = x_train.shape[0]
 loss = 0
+
 for epoch in range(n_epoch):
     print ("epochs: ", epoch)
-    print (loss)
+    print ("Losses", loss)
     for i in range(int(size/m)):
         idx = np.random.randint(0, x_train.shape[0], m)
         imgs = x_train[idx]
+        print (imgs.shape)
         labels = y_train[idx]
         loss = train_on_batch([imgs, labels], epoch)
+    #save input image
+    save_batch_result(imgs, 'Fixed_results', epoch)
+    #save generated image
+    f_latent = encoder.predict([imgs, labels])
+    f_image = decoder.predict([f_latent, labels])
+    save_batch_result(f_image, 'Random_results', epoch)
+    show_result(f_image, 'Results', epoch, True)
 
 #%% generate image
-num_generated = 10
-
-#the number you want to produce
-digit = 9
-
-ydd = np.ones(num_generated )*digit
-
-sample =  np.random.normal(size=(num_generated , latent_dim)).astype('float32')
-yd = to_categorical(ydd, num_classes)
-
-pred = decoder.predict([sample, yd], batch_size = num_generated )
+#num_generated = 10
+#
+##the number you want to produce
+#digit = 9
+#
+#ydd = np.ones(num_generated )*digit
+#
+#sample =  np.random.normal(size=(num_generated , latent_dim)).astype('float32')
+#yd = to_categorical(ydd, num_classes)
+#
+#pred = decoder.predict([sample, yd], batch_size = num_generated )
 
 #%% show generated Image
 
 
-for i in range(num_generated):
-    img = pred[i,:].reshape(28,28)
-    plt.imshow(img, cmap='Greys_r')
-    plt.show()
+#for i in range(num_generated):
+#    img = pred[i,:].reshape(input_shape)
+#    plt.imshow(img, cmap='Greys_r')
+#    plt.show()
+#    
+    
