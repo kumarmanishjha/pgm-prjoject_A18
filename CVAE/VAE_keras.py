@@ -101,6 +101,10 @@ vae.add_loss(vae_loss)
 vae.compile(optimizer = 'adam')
 vae.summary()
 vae.fit(x_train, batch_size=m, epochs = n_epoch)
+#%%
+
+
+
 
 #%% Produce image by running Encoder and Decoder once and reconstruct
 

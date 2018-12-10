@@ -16,7 +16,7 @@ import itertools
 from keras.metrics import binary_accuracy
 import keras.backend as K
 from keras.datasets import mnist
-from keras.layers import Input, Dense, Lambda, Reshape, UpSampling2D, Concatenate, Conv2D, AveragePooling2D, Dropout, Flatten
+from keras.layers import Input, Dense, MaxPooling2D, BatchNormalization, Lambda, Reshape, UpSampling2D, Conv2DTranspose, Concatenate, Conv2D, AveragePooling2D, Dropout, Flatten
 from keras.models import Model
 from keras.objectives import binary_crossentropy
 from keras.callbacks import LearningRateScheduler
@@ -194,40 +194,40 @@ def get_CIFAR10_data(num_training=49000, num_validation=1000, num_test=10000):
     X_train, y_train, X_test, y_test = load_CIFAR10(cifar10_dir)
 
     # Subsample the data
-    mask = range(num_training, num_training + num_validation)
-    X_val = X_train[mask]
-    y_val = y_train[mask]
-    mask = range(num_training)
-    X_train = X_train[mask]
-    y_train = y_train[mask]
-    mask = range(num_test)
-    X_test = X_test[mask]
-    y_test = y_test[mask]
+#    mask = range(num_training, num_training + num_validation)
+#    X_val = X_train[mask]
+#    y_val = y_train[mask]
+#    mask = range(num_training)
+#    X_train = X_train[mask]
+#    y_train = y_train[mask]
+#    mask = range(num_test)
+#    X_test = X_test[mask]
+#    y_test = y_test[mask]
 
     x_train = X_train.astype('float32')
     x_test = X_test.astype('float32')
-    x_val = X_val.astype('float32')
+#    x_val = X_val.astype('float32')
     x_train /= 255
     x_test /= 255
-    x_val /= 255
+#    x_val /= 255
     
 
-    return x_train, y_train, x_val, y_val, x_test, y_test
+    return x_train, y_train, x_test, y_test
 
 
 # Invoke the above function to get our data.
-x_train, y_train, x_val, y_val, x_test, y_test = get_CIFAR10_data()
+x_train, y_train, x_test, y_test = get_CIFAR10_data()
 
 
 print('Train data shape: ', x_train.shape)
 print('Train labels shape: ', y_train.shape)
-print('Validation data shape: ', x_val.shape)
-print('Validation labels shape: ', y_val.shape)
+#print('Validation data shape: ', x_val.shape)
+#print('Validation labels shape: ', y_val.shape)
 print('Test data shape: ', x_test.shape)
 print('Test labels shape: ', y_test.shape)
 
 y_train = to_categorical(y_train, num_classes)
-y_val =  to_categorical(y_val, num_classes)
+#y_val =  to_categorical(y_val, num_classes)
 y_test = to_categorical(y_test, num_classes)
 
 def to_image(data, row, col, channel):
@@ -238,7 +238,7 @@ def to_image(data, row, col, channel):
     return tp
         
 x_train = to_image(x_train, img_rows, img_cols, channels)
-x_val = to_image(x_val, img_rows, img_cols, channels)
+#x_val = to_image(x_val, img_rows, img_cols, channels)
 x_test = to_image(x_test, img_rows, img_cols, channels)
 
 
@@ -263,18 +263,18 @@ c = UpSampling2D(size=(img_rows, img_cols))(c)
 en = Concatenate(axis=-1)([img, c])
 
 en = Conv2D(32, (3, 3), padding='same', activation='relu')(en)
-en = Conv2D(32, (3, 3), padding='same', activation='relu')(en)
-en = AveragePooling2D(pool_size=(2, 2))(en)
+BatchNormalization()
+en = MaxPooling2D(pool_size=(2, 2))(en)
 en = Dropout(0.2)(en)
 
 en = Conv2D(64, (3, 3), padding='same', activation='relu')(en)
-en = Conv2D(64, (3, 3), padding='same', activation='relu')(en)
-en = AveragePooling2D(pool_size=(2, 2))(en)
+BatchNormalization()
+en = MaxPooling2D(pool_size=(2, 2))(en)
 en = Dropout(0.2)(en)
 
 en = Conv2D(128, (3, 3), padding='same', activation='relu')(en)
-en = Conv2D(128, (3, 3), padding='same', activation='relu')(en)
-en = AveragePooling2D(pool_size=(2, 2))(en)
+BatchNormalization()
+en = MaxPooling2D(pool_size=(2, 2))(en)
 en = Dropout(0.2)(en)
 
 en = Flatten()(en)
@@ -305,19 +305,16 @@ dec_in = Concatenate(axis=-1)([dec, label])
 de = Dense(4*4*128, activation='relu')(dec_in)
 de = Reshape((4,4,128))(de)
 
-de = UpSampling2D((2, 2))(de)
-de = Conv2D(256, (3, 3), padding='same', activation='relu')(de)
-de = Conv2D(256, (3, 3), padding='same', activation='relu')(de)
+de = Conv2DTranspose(1024, (1,1), strides=(2, 2))(de)
+BatchNormalization()
 
-de = UpSampling2D((2, 2))(de)
-de = Conv2D(128, (3, 3), padding='same', activation='relu')(de)
-de = Conv2D(128, (3, 3), padding='same', activation='relu')(de)
+de = Conv2DTranspose(1024, (2,2), strides=(2, 2))(de)
+BatchNormalization()
 
-de = UpSampling2D((2, 2))(de)
-de = Conv2D(64, (3, 3), padding='same', activation='relu')(de)
-de = Conv2D(64, (3, 3), padding='same', activation='relu')(de)
+de = Conv2DTranspose(1024, (2,2), strides=(2, 2))(de)
+BatchNormalization()
 
-h_decoded = Conv2D(3, (3, 3), activation='sigmoid', padding='same')(de)
+h_decoded = Conv2D(3, (3, 3), activation='tanh', padding='same')(de)
 decoder = Model([dec, label], h_decoded)
 print ("DECODER")
 decoder.summary()
@@ -333,18 +330,18 @@ x_p = decoder([z_p, label])
 #discriminator 
 dis_in = Input(shape=input_shape)
 di = Conv2D(32, (3, 3), padding='same', activation='relu')(dis_in)
-di = Conv2D(32, (3, 3), padding='same', activation='relu')(di)
-di = AveragePooling2D(pool_size=(2, 2))(di)
+BatchNormalization()
+di = MaxPooling2D(pool_size=(2, 2))(di)
 di = Dropout(0.2)(di)
 
 di = Conv2D(64, (3, 3), padding='same', activation='relu')(di)
-di = Conv2D(64, (3, 3), padding='same', activation='relu')(di)
-di = AveragePooling2D(pool_size=(2, 2))(di)
+BatchNormalization()
+di = MaxPooling2D(pool_size=(2, 2))(di)
 di = Dropout(0.2)(di)
 
 di = Conv2D(128, (3, 3), padding='same', activation='relu')(di)
-di = Conv2D(128, (3, 3), padding='same', activation='relu')(di)
-di = AveragePooling2D(pool_size=(2, 2))(di)
+BatchNormalization()
+di = MaxPooling2D(pool_size=(2, 2))(di)
 di = Dropout(0.2)(di)
 
 di = Flatten()(di)
@@ -369,18 +366,18 @@ d_loss = DiscriminatorLossLayer()([y_r, y_f, y_p])
 #classificator
 cl_in = Input(shape= input_shape)
 cl = Conv2D(32, (3, 3), padding='same', activation='relu')(cl_in)
-cl = Conv2D(32, (3, 3), padding='same', activation='relu')(cl)
-cl = AveragePooling2D(pool_size=(2, 2))(cl)
+BatchNormalization()
+cl = MaxPooling2D(pool_size=(2, 2))(cl)
 cl = Dropout(0.2)(cl)
 
 cl = Conv2D(64, (3, 3), padding='same', activation='relu')(cl)
-cl = Conv2D(64, (3, 3), padding='same', activation='relu')(cl)
-cl = AveragePooling2D(pool_size=(2, 2))(cl)
+BatchNormalization()
+cl = MaxPooling2D(pool_size=(2, 2))(cl)
 cl = Dropout(0.2)(cl)
 
 cl = Conv2D(128, (3, 3), padding='same', activation='relu')(cl)
-cl = Conv2D(128, (3, 3), padding='same', activation='relu')(cl)
-cl = AveragePooling2D(pool_size=(2, 2))(cl)
+BatchNormalization()
+cl = MaxPooling2D(pool_size=(2, 2))(cl)
 cl = Dropout(0.2)(cl)
 
 cl = Flatten()(cl)

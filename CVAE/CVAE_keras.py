@@ -15,7 +15,7 @@ from skimage.io import imsave
 import itertools 
 
 from keras.datasets import mnist
-from keras.layers import Input, Dense, Lambda, Reshape, UpSampling2D, Concatenate, Conv2D, AveragePooling2D, Dropout, Flatten
+from keras.layers import Input, Dense, Lambda,  BatchNormalization, Reshape, UpSampling2D, Concatenate, Conv2D, AveragePooling2D, Dropout, Flatten
 from keras.models import Model
 from keras.objectives import binary_crossentropy
 from keras.callbacks import LearningRateScheduler
@@ -196,16 +196,19 @@ en = Concatenate(axis=-1)([img, c])
 
 en = Conv2D(32, (3, 3), padding='same', activation='relu')(en)
 en = Conv2D(32, (3, 3), padding='same', activation='relu')(en)
+BatchNormalization()
 en = AveragePooling2D(pool_size=(2, 2))(en)
 en = Dropout(0.2)(en)
 
 en = Conv2D(64, (3, 3), padding='same', activation='relu')(en)
-en = Conv2D(64, (3, 3), padding='same', activation='relu')(en)
+en = Conv2D(32, (3, 3), padding='same', activation='relu')(en)
+BatchNormalization()
 en = AveragePooling2D(pool_size=(2, 2))(en)
 en = Dropout(0.2)(en)
 
 en = Conv2D(128, (3, 3), padding='same', activation='relu')(en)
-en = Conv2D(128, (3, 3), padding='same', activation='relu')(en)
+en = Conv2D(32, (3, 3), padding='same', activation='relu')(en)
+BatchNormalization()
 en = AveragePooling2D(pool_size=(2, 2))(en)
 en = Dropout(0.2)(en)
 
