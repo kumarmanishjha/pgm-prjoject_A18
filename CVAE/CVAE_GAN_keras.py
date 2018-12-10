@@ -591,36 +591,35 @@ for epoch in range(n_epoch):
     for i in range(int(size/m)):
         idx = np.random.randint(0, x_train.shape[0], m)
         imgs = x_train[idx]
-        print (imgs.shape)
         labels = y_train[idx]
         loss = train_on_batch([imgs, labels], epoch)
     #save input image
-    save_batch_result(imgs, 'Fixed_results', epoch)
+    save_batch_result(imgs[0:50], 'Fixed_results', epoch)
     #save generated image
-    f_latent = encoder.predict([imgs, labels])
-    f_image = decoder.predict([f_latent, labels])
+    f_latent = encoder.predict([imgs[0:50], labels[0:50]])
+    f_image = decoder.predict([f_latent, labels[0:50]])
     save_batch_result(f_image, 'Random_results', epoch)
     show_result(f_image, 'Results', epoch, True)
 
 #%% generate image
-#num_generated = 10
-#
-##the number you want to produce
-#digit = 9
-#
-#ydd = np.ones(num_generated )*digit
-#
-#sample =  np.random.normal(size=(num_generated , latent_dim)).astype('float32')
-#yd = to_categorical(ydd, num_classes)
-#
-#pred = decoder.predict([sample, yd], batch_size = num_generated )
+num_generated = 10
+
+#the number you want to produce
+digit = 9
+
+ydd = np.ones(num_generated )*digit
+
+sample =  np.random.normal(size=(num_generated , latent_dim)).astype('float32')
+yd = to_categorical(ydd, num_classes)
+
+pred = decoder.predict([sample, yd], batch_size = num_generated )
 
 #%% show generated Image
 
 
-#for i in range(num_generated):
-#    img = pred[i,:].reshape(input_shape)
-#    plt.imshow(img, cmap='Greys_r')
-#    plt.show()
-#    
+for i in range(num_generated):
+    img = pred[i,:].reshape(input_shape)
+    plt.imshow(img, cmap='Greys_r')
+    plt.show()
+    
     
