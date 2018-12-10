@@ -15,13 +15,14 @@ from skimage.io import imsave
 import itertools 
 
 from keras.datasets import mnist
-from keras.layers import Input, Dense, Lambda,  BatchNormalization, Reshape, UpSampling2D, Concatenate, Conv2D, AveragePooling2D, Dropout, Flatten
+from keras.layers import Input, Dense, Lambda, Conv2DTranspose,  BatchNormalization, Reshape, UpSampling2D, Concatenate, Conv2D, AveragePooling2D, Dropout, Flatten
 from keras.models import Model
 from keras.objectives import binary_crossentropy
 from keras.callbacks import LearningRateScheduler
 from keras.utils import to_categorical
 from keras.engine.topology import Layer
 from keras.optimizers import Adam
+from keras import metrics
 
 ##%%
 ##MNIST
@@ -171,103 +172,154 @@ class GeneratorLossLayer(Layer):
 def zero_loss(y_true, y_pred):
     return K.zeros_like(y_true)
 
-
 #%%
+#The number of sample from z 
 m = 128
-n_x = x_train.shape[1]
-n_y = y_train.shape[1]
 
-n_epoch = 20
+#dimension of the latent variable (can decide by ourselves)
+latent_dim = 100 
 
-
-latent_dim= 100
-
-#Use image and label as input together
-
-#Use image and label as input together
-
-#Build Encoder
+#epochs
+n_epoch = 2
+#Q(z|X) -- encoder
 img = Input(shape=input_shape)
 label = Input(shape=(num_classes,))
-
 c = Reshape((1, 1, num_classes))(label)
 c = UpSampling2D(size=(img_rows, img_cols))(c)
 en = Concatenate(axis=-1)([img, c])
 
 en = Conv2D(32, (3, 3), padding='same', activation='relu')(en)
 en = Conv2D(32, (3, 3), padding='same', activation='relu')(en)
-BatchNormalization()
+en = BatchNormalization()(en)
 en = AveragePooling2D(pool_size=(2, 2))(en)
 en = Dropout(0.2)(en)
 
 en = Conv2D(64, (3, 3), padding='same', activation='relu')(en)
-en = Conv2D(32, (3, 3), padding='same', activation='relu')(en)
+en = Conv2D(64, (3, 3), padding='same', activation='relu')(en)
+en = BatchNormalization()(en)
 BatchNormalization()
 en = AveragePooling2D(pool_size=(2, 2))(en)
 en = Dropout(0.2)(en)
 
 en = Conv2D(128, (3, 3), padding='same', activation='relu')(en)
-en = Conv2D(32, (3, 3), padding='same', activation='relu')(en)
+en = Conv2D(128, (3, 3), padding='same', activation='relu')(en)
+en = BatchNormalization()(en)
 BatchNormalization()
 en = AveragePooling2D(pool_size=(2, 2))(en)
 en = Dropout(0.2)(en)
 
 en = Flatten()(en)
 
-
 #calculate the mu and sigmas 
 mu = Dense(latent_dim, activation='linear')(en)
 log_sigma = Dense(latent_dim, activation='linear')(en)
 
-encoder = Model([img, label], mu)
-print ("ENCODER")
-encoder.summary()
-
-#KL loss 
-kl_loss = KLLossLayer()([mu, log_sigma])
-
 def sample_z(args):
-    mu, log_sigma = args
-    eps = K.random_normal(shape=(m, latent_dim))
-    return mu + K.exp(log_sigma / 2) * eps
+    z_mean, z_log_var = args
+    batch = K.shape(z_mean)[0]
+    dim = K.int_shape(z_mean)[1]
+    # by default, random_normal has mean=0 and std=1.0
+    epsilon = K.random_normal(shape=(batch, dim))
+    return z_mean + K.exp(0.5 * z_log_var) * epsilon
 
-# Sample z ~ Q(z|X,y)
-z = Lambda(sample_z, output_shape = (latent_dim, ))([mu, log_sigma])
+#Sample z ~ Q(z|X)
+z = Lambda(sample_z, output_shape=(latent_dim,))([mu, log_sigma])
 
+
+#P(X|z) -- decoder
 #decoder
 #Build Decoder
-dec = Input(shape=(latent_dim,))
-dec_in = Concatenate(axis=-1)([dec, label])
+#dec = Input(shape=(latent_dim,))
+dec_in = Concatenate(axis=-1)([z, label])
 de = Dense(4*4*128, activation='relu')(dec_in)
 de = Reshape((4,4,128))(de)
 
-de = UpSampling2D((2,2))(de)
-de = Conv2D(256, (3, 3), padding='same', activation='relu')(de)
-de = Conv2D(256, (3, 3), padding='same', activation='relu')(de)
+de = Conv2DTranspose(256, (1,1), strides=(2, 2))(de)
+de = Conv2D(128, (3, 3), padding='same', activation='relu')(de)
+de = Conv2D(128, (3, 3), padding='same', activation='relu')(de)
+de = BatchNormalization()(de)
 
-de = UpSampling2D((2, 2))(de)
-de = Conv2D(128, (3, 3), padding='same', activation='relu')(de)
-de = Conv2D(128, (3, 3), padding='same', activation='relu')(de)
-#
-de = UpSampling2D((2, 2))(de)
+de = Conv2DTranspose(128, (2,2), strides=(2, 2))(de)
 de = Conv2D(64, (3, 3), padding='same', activation='relu')(de)
 de = Conv2D(64, (3, 3), padding='same', activation='relu')(de)
+de = BatchNormalization()(de)
+
+de = Conv2DTranspose(64, (2,2), strides=(2, 2))(de)
+de = Conv2D(32, (3, 3), padding='same', activation='relu')(de)
+de = Conv2D(32, (3, 3), padding='same', activation='relu')(de)
+de = BatchNormalization()(de)
 
 h_decoded = Conv2D(3, (3, 3), activation='sigmoid', padding='same')(de)
 
-decoder = Model([dec, label], h_decoded)
-print ("DECODER")
-decoder.summary()
 
-z_p = Input(shape=(latent_dim,))
-x_f = decoder([z, label])
-g_loss = GeneratorLossLayer()([img, x_f])        
+#h_p = decoder_hidden(z)
+#outputs = decoder_out(h_p)
+
+#Overall VAE model
 
 
-enc_trainer = Model(inputs=[img, label],
-                        outputs=[g_loss, kl_loss])
-enc_trainer.compile(loss=[zero_loss, zero_loss],
-                        optimizer=Adam(lr=2.0e-4, beta_1=0.5))
+#encoder model
+#encoder = Model(img, [mu, log_sigma, z])
+#print ("ENCODER")
+#encoder.summary()
+
+#decoder model
+#decoder = Model(dec,h_decoded)
+#print ("DECODER")
+#decoder.summary()
+
+#outputs = decoder(z)
+cvae = Model([img, label], h_decoded)
+
+#def vae_loss(y_true, y_pred):
+#    """loss = reconstruction loss + KL loss for each data batch"""
+#    
+#    # E[log P(X|z)]
+#    recon = K.sum(binary_crossentropy(y_pred, y_true))
+#    
+#    # D_KL(Q(z|x) || P(z|X))
+#    kl = -0.5 * K.sum( 1. + log_sigma - K.exp(log_sigma) - K.square(mu), axis = -1)
+#    
+#    return K.mean(recon + kl)
+
+
+#define loss
+xent_loss = img_rows * img_cols * channels * metrics.binary_crossentropy(
+    K.flatten(img),
+    K.flatten(h_decoded))
+kl_loss = - 0.5 * K.sum(1 + log_sigma - K.square(mu) - K.exp(log_sigma), axis=-1)
+cvae_loss = K.mean(xent_loss + kl_loss)
+cvae.add_loss(cvae_loss)
+cvae.compile(optimizer = 'adam')
+cvae.summary()
+cvae.fit([x_train,y_train], batch_size=m, epochs = n_epoch)
+#%%
+encoder = Model([img, label], [mu, log_sigma, z])
+
+decoder_input = Input(shape=(latent_dim,))
+d = Concatenate(axis=-1)([decoder_input, label])
+d = Dense(4*4*128, activation='relu')(decoder_input)
+d = Reshape((4,4,128))(d)
+d = BatchNormalization()(d)
+
+d = Conv2DTranspose(1024, (1,1), strides=(2, 2))(d)
+d = Conv2D(512, (3, 3), padding='same', activation='relu')(d)
+d = Conv2D(512, (3, 3), padding='same', activation='relu')(d)
+d = BatchNormalization()(d)
+
+d = Conv2DTranspose(512, (2,2), strides=(2, 2))(d)
+d = Conv2D(256, (3, 3), padding='same', activation='relu')(d)
+d = Conv2D(256, (3, 3), padding='same', activation='relu')(d)
+d = BatchNormalization()(d)
+
+d = Conv2DTranspose(256, (2,2), strides=(2, 2))(d)
+d = Conv2D(128, (3, 3), padding='same', activation='relu')(d)
+d = Conv2D(128, (3, 3), padding='same', activation='relu')(d)
+d = BatchNormalization()(d)
+
+decoder_output = Conv2D(3, (3, 3), activation='sigmoid', padding='same')(d)
+decoder = Model(decoder_input, decoder_output)
+
 
 
 #%% training
@@ -301,52 +353,64 @@ def show_result(batch_data, path, epoch, show):
       else:
           plt.close()
           
-def train_on_batch(x_batch, epoch):
-    x_r, c = x_batch
-    x_dummy = np.zeros(x_r.shape, dtype='float32')
-    z_dummy = np.zeros(z.shape, dtype='float32')
-
-    # Train autoencoder
-    enc_trainer.train_on_batch([x_r, c], [x_dummy, z_dummy])
-    
-
-    return loss
-
-
-#%% Training 
-n_epoch = 20
-
-# results save folder
-if not os.path.isdir('CVAE_Random_results'):
-    os.mkdir('CVAE_Random_results')
-if not os.path.isdir('CVAE_Fixed_results'):
-    os.mkdir('CVAE_Fixed_results')
-if not os.path.isdir('CVAE_Results'):
-    os.mkdir('CVAE_Results')    
-
-
-size = x_train.shape[0]
-loss = 0
-
-for epoch in range(n_epoch):
-    print ("epochs: ", epoch)
-    print ("Losses", loss)
-    for i in range(int(size/m)):
-        idx = np.random.randint(0, x_train.shape[0], m)
-        imgs = x_train[idx]
-        labels = y_train[idx]
-        loss = train_on_batch([imgs, labels], epoch)
-    #save input image
-    save_batch_result(imgs[0:50], 'CVAE_Fixed_results', epoch)
-    #save generated image
-    f_latent = encoder.predict([imgs[0:50], labels[0:50]])
-    f_image = decoder.predict([f_latent, labels[0:50]])
-    save_batch_result(f_image, 'CVAE_Random_results', epoch)
-    show_result(f_image, 'CVAE_Results', epoch, True)
+#def train_on_batch(x_batch, epoch):
+#    x_r, c = x_batch
+#    x_dummy = np.zeros(x_r.shape, dtype='float32')
+##    z_dummy = np.zeros(z.shape, dtype='float32')
+#
+#    # Train autoencoder
+#    loss = cvae.train_on_batch([x_r, c], x_dummy)
+#    
+#
+#    return loss
+#
+#
+##%% Training 
+#n_epoch = 20
+#
+## results save folder
+#if not os.path.isdir('CVAE_Random_results'):
+#    os.mkdir('CVAE_Random_results')
+#if not os.path.isdir('CVAE_Fixed_results'):
+#    os.mkdir('CVAE_Fixed_results')
+#if not os.path.isdir('CVAE_Results'):
+#    os.mkdir('CVAE_Results')    
+#
+#
+#size = x_train.shape[0]
+#loss = 0
+#
+#for epoch in range(n_epoch):
+#    print ("epochs: ", epoch)
+#    print ("Losses", loss)
+#    for i in range(int(size/m)):
+#        idx = np.random.randint(0, x_train.shape[0], m)
+#        imgs = x_train[idx]
+#        labels = y_train[idx]
+#        loss = train_on_batch([imgs, labels], epoch)
+#    #save input image
+#    save_batch_result(imgs[0:50], 'CVAE_Fixed_results', epoch)
+#    #save generated image
+#    f_latent = encoder.predict([imgs[0:50], labels[0:50]])
+#    f_image = decoder.predict([f_latent, labels[0:50]])
+#    save_batch_result(f_image, 'CVAE_Random_results', epoch)
+#    show_result(f_image, 'CVAE_Results', epoch, True)
 
 
 #%%
 
+#randomly sample one sample from N(0, I)
+mean = np.zeros((latent_dim))
+cov = np.identity(latent_dim)
+
+sample = np.random.multivariate_normal(mean, cov, 1000)
+
+pred = decoder.predict(sample, batch_size = m)
+
+a = (pred[0,:]*255).astype(np.uint8)
+
+
+plt.imshow(a, cmap = 'gray')
 
 
 
