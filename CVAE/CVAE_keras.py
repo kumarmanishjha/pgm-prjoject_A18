@@ -20,6 +20,8 @@ from keras.models import Model
 from keras.objectives import binary_crossentropy
 from keras.callbacks import LearningRateScheduler
 from keras.utils import to_categorical
+from keras.engine.topology import Layer
+from keras.optimizers import Adam
 
 #%%
 #MNIST
@@ -43,6 +45,7 @@ num_classes = 10
 img_rows, img_cols = 32, 32
 channels = 3
 input_shape = (img_rows, img_cols, channels)
+
 def load_pickle(f):
         return  pickle.load(f, encoding='latin1')
 
@@ -123,8 +126,53 @@ x_train = to_image(x_train, img_rows, img_cols, channels)
 x_val = to_image(x_val, img_rows, img_cols, channels)
 x_test = to_image(x_test, img_rows, img_cols, channels)
 
-#%%
+#%% LOSS
 
+class KLLossLayer(Layer):
+    __name__ = 'kl_loss_layer'
+
+    def __init__(self, **kwargs):
+        self.is_placeholder = True
+        super(KLLossLayer, self).__init__(**kwargs)
+
+    def lossfun(self, z_avg, z_log_var):
+        kl_loss = -0.5 * K.mean(1.0 + z_log_var - K.square(z_avg) - K.exp(z_log_var))
+        return kl_loss
+
+    def call(self, inputs):
+        z_avg = inputs[0]
+        z_log_var = inputs[1]
+        loss = self.lossfun(z_avg, z_log_var)
+        self.add_loss(loss, inputs=inputs)
+
+        return z_avg
+    
+class GeneratorLossLayer(Layer):
+    __name__ = 'generator_loss_layer'
+
+    def __init__(self, **kwargs):
+        self.is_placeholder = True
+        super(GeneratorLossLayer, self).__init__(**kwargs)
+
+    def lossfun(self, y_true, y_pred):
+        loss_x = K.sum(K.binary_crossentropy(y_pred, y_true), axis=1)
+
+
+        return loss_x 
+
+    def call(self, inputs):
+        y_true = inputs[0]
+        y_pred = inputs[1]
+        loss = self.lossfun(y_true, y_pred)
+        self.add_loss(loss, inputs=inputs)
+
+        return y_true
+    
+def zero_loss(y_true, y_pred):
+    return K.zeros_like(y_true)
+
+
+#%%
 m = 128
 n_x = x_train.shape[1]
 n_y = y_train.shape[1]
@@ -139,7 +187,7 @@ latent_dim= 100
 #Use image and label as input together
 
 #Build Encoder
-img = Input(input_shape)
+img = Input(shape=input_shape)
 label = Input(shape=(num_classes,))
 
 c = Reshape((1, 1, num_classes))(label)
@@ -165,13 +213,15 @@ en = Flatten()(en)
 
 
 #calculate the mu and sigmas 
-mu = Dense(latent_dim)(en)
-log_sigma = Dense(latent_dim)(en)
-
+mu = Dense(latent_dim, activation='linear')(en)
+log_sigma = Dense(latent_dim, activation='linear')(en)
 
 encoder = Model([img, label], mu)
 print ("ENCODER")
 encoder.summary()
+
+#KL loss 
+kl_loss = KLLossLayer()([mu, log_sigma])
 
 def sample_z(args):
     mu, log_sigma = args
@@ -179,7 +229,7 @@ def sample_z(args):
     return mu + K.exp(log_sigma / 2) * eps
 
 # Sample z ~ Q(z|X,y)
-z = Lambda(sample_z)([mu, log_sigma])
+z = Lambda(sample_z, output_shape = (latent_dim, ))([mu, log_sigma])
 
 #decoder
 #Build Decoder
@@ -188,43 +238,37 @@ dec_in = Concatenate(axis=-1)([dec, label])
 de = Dense(4*4*128, activation='relu')(dec_in)
 de = Reshape((4,4,128))(de)
 
-de = UpSampling2D((2, 2))(de)
+de = UpSampling2D((2,2))(de)
 de = Conv2D(256, (3, 3), padding='same', activation='relu')(de)
 de = Conv2D(256, (3, 3), padding='same', activation='relu')(de)
 
 de = UpSampling2D((2, 2))(de)
 de = Conv2D(128, (3, 3), padding='same', activation='relu')(de)
 de = Conv2D(128, (3, 3), padding='same', activation='relu')(de)
-
+#
 de = UpSampling2D((2, 2))(de)
 de = Conv2D(64, (3, 3), padding='same', activation='relu')(de)
 de = Conv2D(64, (3, 3), padding='same', activation='relu')(de)
 
 h_decoded = Conv2D(3, (3, 3), activation='sigmoid', padding='same')(de)
+
 decoder = Model([dec, label], h_decoded)
 print ("DECODER")
 decoder.summary()
 
+z_p = Input(shape=(latent_dim,))
+x_f = decoder([z, label])
+g_loss = GeneratorLossLayer()([img, x_f])        
 
 
-
-#whole model
-vae = Model([img, label], [h_decoded])
-
-#define loss
-reconstruction_loss = binary_crossentropy(img, h_decoded)
-reconstruction_loss *= 784
-kl_loss = 1 + log_sigma - K.square(mu) - K.exp(log_sigma)
-kl_loss = K.sum(kl_loss, axis=-1)
-kl_loss *= -0.5
-vae_loss = K.mean(reconstruction_loss + kl_loss)
-vae.add_loss(vae_loss)
-vae.compile(optimizer = 'adam')
-vae.summary()
-#vae.fit([x_train, y_train], batch_size=m, epochs = 50)
+enc_trainer = Model(inputs=[img, label],
+                        outputs=[g_loss, kl_loss])
+enc_trainer.compile(loss=[zero_loss, zero_loss],
+                        optimizer=Adam(lr=2.0e-4, beta_1=0.5))
 
 
 #%% training
+
 def save_batch_result(batch_data, path, epoch):
     batch_size = batch_data.shape[0]
     for i in range(batch_size):
@@ -256,12 +300,16 @@ def show_result(batch_data, path, epoch, show):
           
 def train_on_batch(x_batch, epoch):
     x_r, c = x_batch
-    batchsize = x_r.shape[0]
-    loss = vae.train_on_batch([x_r, c])
+    x_dummy = np.zeros(x_r.shape, dtype='float32')
+    z_dummy = np.zeros(z.shape, dtype='float32')
+
+    # Train autoencoder
+    enc_trainer.train_on_batch([x_r, c], [x_dummy, z_dummy])
+    
+
     return loss
 
 
-#%%%
 #%% Training 
 n_epoch = 20
 
@@ -290,8 +338,8 @@ for epoch in range(n_epoch):
     #save generated image
     f_latent = encoder.predict([imgs[0:50], labels[0:50]])
     f_image = decoder.predict([f_latent, labels[0:50]])
-    save_batch_result(f_image, 'CVAE_Random_results', epoch)
-    show_result(f_image, 'CVAE_Results', epoch, True)
+    save_batch_result(f_image, 'Random_results', epoch)
+    show_result(f_image, 'Results', epoch, True)
 
 
 #%%

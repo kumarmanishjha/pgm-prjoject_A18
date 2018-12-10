@@ -24,7 +24,7 @@ from keras.utils import to_categorical
 from keras.engine.topology import Layer
 from keras.optimizers import Adam
 
-import scipy.misc
+
 
 class KLLossLayer(Layer):
     __name__ = 'kl_loss_layer'
