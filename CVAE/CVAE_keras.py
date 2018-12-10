@@ -23,16 +23,16 @@ from keras.utils import to_categorical
 from keras.engine.topology import Layer
 from keras.optimizers import Adam
 
-#%%
-#MNIST
-num_classes = 10
-(x_train, y_train_), (x_test, y_test_) = mnist.load_data()
-x_train = x_train.astype('float32') / 255.
-x_test = x_test.astype('float32') / 255.
-x_train = x_train.reshape((len(x_train), np.prod(x_train.shape[1:])))
-x_test = x_test.reshape((len(x_test), np.prod(x_test.shape[1:])))
-y_train = to_categorical(y_train_, num_classes)
-y_test = to_categorical(y_test_, num_classes)
+##%%
+##MNIST
+#num_classes = 10
+#(x_train, y_train_), (x_test, y_test_) = mnist.load_data()
+#x_train = x_train.astype('float32') / 255.
+#x_test = x_test.astype('float32') / 255.
+#x_train = x_train.reshape((len(x_train), np.prod(x_train.shape[1:])))
+#x_test = x_test.reshape((len(x_test), np.prod(x_test.shape[1:])))
+#y_train = to_categorical(y_train_, num_classes)
+#y_test = to_categorical(y_test_, num_classes)
 
 #%% CIFAR-10
 
@@ -338,8 +338,8 @@ for epoch in range(n_epoch):
     #save generated image
     f_latent = encoder.predict([imgs[0:50], labels[0:50]])
     f_image = decoder.predict([f_latent, labels[0:50]])
-    save_batch_result(f_image, 'Random_results', epoch)
-    show_result(f_image, 'Results', epoch, True)
+    save_batch_result(f_image, 'CVAE_Random_results', epoch)
+    show_result(f_image, 'CVAE_Results', epoch, True)
 
 
 #%%
