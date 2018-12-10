@@ -5,12 +5,13 @@ Created on Wed Dec  5 15:45:34 2018
 @author: Gabriel Hsu
 """
 
+import os 
 import numpy as np
 import matplotlib.pyplot as plt
-from keras.metrics import binary_accuracy
-import keras.backend as K
 import tensorflow as tf
 
+from keras.metrics import binary_accuracy
+import keras.backend as K
 from keras.datasets import mnist
 from keras.layers import Input, Dense, Lambda, Reshape, UpSampling2D, Concatenate, Conv2D, AveragePooling2D, Dropout, Flatten
 from keras.models import Model
@@ -373,7 +374,7 @@ dis_trainer.compile(loss=[zero_loss],
                          optimizer=Adam(lr=2.0e-4, beta_1=0.5),
                          metrics=[discriminator_accuracy(y_r, y_f, y_p)])
 
-print ("SISCRIMINATOR　TRAINER")
+print ("DISCRIMINATOR　TRAINER")
 dis_trainer.summary()
 
 # Build generator trainer
@@ -403,7 +404,16 @@ print ("ENCODER TRAINER")
 enc_trainer.summary()
 
 #%% training
-def train_on_batch(x_batch):
+def save_batch_result(batch_data, path, epoch):
+    batch_size = batch_data.shape[0]
+    for i in range(batch_size):
+        img_sav = np.squeeze(batch_data[i,:,:,:])*255
+        f_name = str(epoch) + '_' + str(i) + '.png'
+        plt.imsave(os.path.join(path,f_name), img_sav.astype(np.uint8), cmap='gray')
+
+
+
+def train_on_batch(x_batch, epoch):
     x_r, c = x_batch
     
     batchsize = x_r.shape[0]
@@ -419,10 +429,16 @@ def train_on_batch(x_batch):
     enc_trainer.train_on_batch([x_r, c, z_p], [x_dummy, z_dummy])
 
     # Train generator
-    g_loss, _, _, _, _, _, g_acc = dec_trainer.train_on_batch([x_r, c, z_p], [x_dummy, f_dummy, f_dummy])
+    g_loss, _, _,  _, _, _, g_acc = dec_trainer.train_on_batch([x_r, c, z_p], [x_dummy, f_dummy, f_dummy])
 
     
-
+    #save input image
+    save_batch_result(x_r, 'Fixed_results', epoch)
+    
+    #save generated image
+    f_latent = encoder.predict(x_r, c)
+    f_image = decoder.predict(f_latent, label)
+    save_batch_result(f_image, 'Fixed_results', epoch)
     # Train classifier
     cls_trainer.train_on_batch([x_r, c], c_dummy)
 
@@ -441,8 +457,15 @@ def predict(z_samples):
     return decoder.predict(z_samples)
 
 #%% Training 
-n_epoch = 20
+n_epoch = 1
 
+# results save folder
+if not os.path.isdir('Random_results'):
+    os.mkdir('Random_results')
+if not os.path.isdir('Fixed_results'):
+    os.mkdir('Fixed_results')
+
+#%%
 #manual training the Model in loops
 size = x_train.shape[0]
 loss = 0
@@ -453,10 +476,9 @@ for epoch in range(n_epoch):
         idx = np.random.randint(0, x_train.shape[0], m)
         imgs = x_train[idx]
         labels = y_train[idx]
-        loss = train_on_batch([imgs, labels])
+        loss = train_on_batch([imgs, labels], epoch)
 
 #%% generate image
-
 num_generated = 10
 
 #the number you want to produce
