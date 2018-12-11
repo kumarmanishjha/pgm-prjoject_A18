@@ -24,108 +24,111 @@ from keras.engine.topology import Layer
 from keras.optimizers import Adam
 from keras import metrics
 
-##%%
-##MNIST
-#num_classes = 10
-#(x_train, y_train_), (x_test, y_test_) = mnist.load_data()
-#x_train = x_train.astype('float32') / 255.
-#x_test = x_test.astype('float32') / 255.
-#x_train = x_train.reshape((len(x_train), np.prod(x_train.shape[1:])))
-#x_test = x_test.reshape((len(x_test), np.prod(x_test.shape[1:])))
-#y_train = to_categorical(y_train_, num_classes)
-#y_test = to_categorical(y_test_, num_classes)
-
-#%% CIFAR-10
-
-
-classes = ('plane', 'car', 'bird', 'cat',
-           'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
-
+#%%
+#MNIST
 num_classes = 10
-
-img_rows, img_cols = 32, 32
-channels = 3
+img_rows, img_cols = 28, 28
+channels = 1
 input_shape = (img_rows, img_cols, channels)
+(x_train, y_train_), (x_test, y_test_) = mnist.load_data()
+x_train = x_train.astype('float32') / 255.
+x_test = x_test.astype('float32') / 255.
+x_train = x_train.reshape((len(x_train), np.prod(x_train.shape[1:])))
+x_test = x_test.reshape((len(x_test), np.prod(x_test.shape[1:])))
+y_train = to_categorical(y_train_, num_classes)
+y_test = to_categorical(y_test_, num_classes)
 
-def load_pickle(f):
-        return  pickle.load(f, encoding='latin1')
-
-def load_CIFAR_batch(filename):
-    """ load single batch of cifar """
-    with open(filename, 'rb') as f:
-        datadict = load_pickle(f)
-        X = datadict['data']
-        Y = datadict['labels']
-        X = X.reshape(10000,3072)
-        Y = np.array(Y)
-        return X, Y
-
-def load_CIFAR10(ROOT):
-    """ load all of cifar """
-    xs = []
-    ys = []
-    for b in range(1,6):
-        f = os.path.join(ROOT, 'data_batch_%d' % (b, ))
-        X, Y = load_CIFAR_batch(f)
-        xs.append(X)
-        ys.append(Y)
-    Xtr = np.concatenate(xs)
-    Ytr = np.concatenate(ys)
-    del X, Y
-    Xte, Yte = load_CIFAR_batch(os.path.join(ROOT, 'test_batch'))
-    return Xtr, Ytr, Xte, Yte
-def get_CIFAR10_data(num_training=49000, num_validation=1000, num_test=10000):
-    # Load the raw CIFAR-10 data
-    cifar10_dir = 'D:/ML_project/cifar-10-batches-py/'
-    X_train, y_train, X_test, y_test = load_CIFAR10(cifar10_dir)
-
-    # Subsample the data
-    mask = range(num_training, num_training + num_validation)
-    X_val = X_train[mask]
-    y_val = y_train[mask]
-    mask = range(num_training)
-    X_train = X_train[mask]
-    y_train = y_train[mask]
-    mask = range(num_test)
-    X_test = X_test[mask]
-    y_test = y_test[mask]
-
-    x_train = X_train.astype('float32')
-    x_test = X_test.astype('float32')
-    x_val = X_val.astype('float32')
-    x_train /= 255
-    x_test /= 255
-    x_val /= 255
-    
-
-    return x_train, y_train, x_val, y_val, x_test, y_test
-
-
-# Invoke the above function to get our data.
-x_train, y_train, x_val, y_val, x_test, y_test = get_CIFAR10_data()
-
-
-print('Train data shape: ', x_train.shape)
-print('Train labels shape: ', y_train.shape)
-print('Validation data shape: ', x_val.shape)
-print('Validation labels shape: ', y_val.shape)
-print('Test data shape: ', x_test.shape)
-print('Test labels shape: ', y_test.shape)
-
-y_train = to_categorical(y_train, num_classes)
-y_val =  to_categorical(y_val, num_classes)
-y_test = to_categorical(y_test, num_classes)
-
-def to_image(data, row, col, channel):
-    size = data.shape[0]
-    tp = np.zeros((size, row, col, channel))
-    for i in range(size):
-        tp[i,:,:,:] = np.transpose(np.reshape(data[i,:],(3, 32,32)), (1,2,0))
-    return tp
-        
-x_train = to_image(x_train, img_rows, img_cols, channels)
-x_val = to_image(x_val, img_rows, img_cols, channels)
-x_test = to_image(x_test, img_rows, img_cols, channels)
+##%% CIFAR-10
+#
+#
+#classes = ('plane', 'car', 'bird', 'cat',
+#           'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
+#
+#num_classes = 10
+#
+#img_rows, img_cols = 32, 32
+#channels = 3
+#input_shape = (img_rows, img_cols, channels)
+#
+#def load_pickle(f):
+#        return  pickle.load(f, encoding='latin1')
+#
+#def load_CIFAR_batch(filename):
+#    """ load single batch of cifar """
+#    with open(filename, 'rb') as f:
+#        datadict = load_pickle(f)
+#        X = datadict['data']
+#        Y = datadict['labels']
+#        X = X.reshape(10000,3072)
+#        Y = np.array(Y)
+#        return X, Y
+#
+#def load_CIFAR10(ROOT):
+#    """ load all of cifar """
+#    xs = []
+#    ys = []
+#    for b in range(1,6):
+#        f = os.path.join(ROOT, 'data_batch_%d' % (b, ))
+#        X, Y = load_CIFAR_batch(f)
+#        xs.append(X)
+#        ys.append(Y)
+#    Xtr = np.concatenate(xs)
+#    Ytr = np.concatenate(ys)
+#    del X, Y
+#    Xte, Yte = load_CIFAR_batch(os.path.join(ROOT, 'test_batch'))
+#    return Xtr, Ytr, Xte, Yte
+#def get_CIFAR10_data(num_training=49000, num_validation=1000, num_test=10000):
+#    # Load the raw CIFAR-10 data
+#    cifar10_dir = 'D:/ML_project/cifar-10-batches-py/'
+#    X_train, y_train, X_test, y_test = load_CIFAR10(cifar10_dir)
+#
+#    # Subsample the data
+#    mask = range(num_training, num_training + num_validation)
+#    X_val = X_train[mask]
+#    y_val = y_train[mask]
+#    mask = range(num_training)
+#    X_train = X_train[mask]
+#    y_train = y_train[mask]
+#    mask = range(num_test)
+#    X_test = X_test[mask]
+#    y_test = y_test[mask]
+#
+#    x_train = X_train.astype('float32')
+#    x_test = X_test.astype('float32')
+#    x_val = X_val.astype('float32')
+#    x_train /= 255
+#    x_test /= 255
+#    x_val /= 255
+#    
+#
+#    return x_train, y_train, x_val, y_val, x_test, y_test
+#
+#
+## Invoke the above function to get our data.
+#x_train, y_train, x_val, y_val, x_test, y_test = get_CIFAR10_data()
+#
+#
+#print('Train data shape: ', x_train.shape)
+#print('Train labels shape: ', y_train.shape)
+#print('Validation data shape: ', x_val.shape)
+#print('Validation labels shape: ', y_val.shape)
+#print('Test data shape: ', x_test.shape)
+#print('Test labels shape: ', y_test.shape)
+#
+#y_train = to_categorical(y_train, num_classes)
+#y_val =  to_categorical(y_val, num_classes)
+#y_test = to_categorical(y_test, num_classes)
+#
+#def to_image(data, row, col, channel):
+#    size = data.shape[0]
+#    tp = np.zeros((size, row, col, channel))
+#    for i in range(size):
+#        tp[i,:,:,:] = np.transpose(np.reshape(data[i,:],(3, 32,32)), (1,2,0))
+#    return tp
+#        
+#x_train = to_image(x_train, img_rows, img_cols, channels)
+#x_val = to_image(x_val, img_rows, img_cols, channels)
+#x_test = to_image(x_test, img_rows, img_cols, channels)
 
 #%% LOSS
 
@@ -180,7 +183,7 @@ m = 128
 latent_dim = 100 
 
 #epochs
-n_epoch = 2
+n_epoch = 20
 #Q(z|X) -- encoder
 img = Input(shape=input_shape)
 label = Input(shape=(num_classes,))
