@@ -11,6 +11,7 @@ from keras.models import Model
 from keras import backend as K
 from keras import metrics
 from keras.datasets import mnist
+from skimage.io import imsave
 
 # input image dimensions
 img_rows, img_cols, img_chns = 32, 32, 3
@@ -268,12 +269,9 @@ sample = np.random.multivariate_normal(mean, cov, 10000)
 
 pred = generator.predict(sample, batch_size = 128)
 
-f_img = x_train[0:10000]
-f_latent = encoder.predict([f_img, y_train[0:10000]])
-f_image = decoder.predict([f_latent, y_train[0:10000]])
 for i in range(10000):
         f_name = str(i) + '_' + str(i) + '.png'
-        img_sav = f_image[i]
+        img_sav = pred[i]
         imsave(os.path.join('Random_results',f_name), img_sav)
 
 #fix
